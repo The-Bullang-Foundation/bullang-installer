@@ -11,9 +11,11 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
+
+// ── OS detection ──────────────────────────────────────────────────────────────
 
 type OS int
 
@@ -45,6 +47,8 @@ func detectOS() OS {
 		return OSUnknown
 	}
 }
+
+// ── Installation steps ────────────────────────────────────────────────────────
 
 type Step struct {
 	label string
@@ -164,6 +168,8 @@ func buildSteps(currentOS OS) []Step {
 	}
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 func ensureBrew(log func(string)) error {
 	if _, err := exec.LookPath("brew"); err == nil {
 		return nil
@@ -192,11 +198,21 @@ func (w *logWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+// ── Result channel ────────────────────────────────────────────────────────────
+
+type result struct {
+	err      error
+	stepName string
+	done     bool
+}
+
+// ── UI ────────────────────────────────────────────────────────────────────────
+
 func main() {
 	currentOS := detectOS()
 	a := app.New()
 	w := a.NewWindow("Bullang Installer")
-	w.Resize(fyne.NewSize(660, 560))
+	w.Resize(fyne.NewSize(660, 580))
 	w.SetFixedSize(true)
 
 	logo := canvas.NewImageFromFile("Icon.png")
@@ -219,9 +235,14 @@ func main() {
 
 	progress := widget.NewProgressBar()
 	progress.Hide()
+
 	stepLabel := widget.NewLabel("")
 	stepLabel.Alignment = fyne.TextAlignCenter
 	stepLabel.Hide()
+
+	// Error label — shown inline when a step fails
+	errorLabel := widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	errorLabel.Hide()
 
 	logOutput := widget.NewMultiLineEntry()
 	logOutput.Disable()
@@ -229,7 +250,10 @@ func main() {
 	logScroll := container.NewScroll(logOutput)
 	logScroll.SetMinSize(fyne.NewSize(620, 220))
 
-	log := func(msg string) {
+	// Channel for goroutine → main thread communication
+	results := make(chan result, 1)
+
+	appendLog := func(msg string) {
 		t := logOutput.Text
 		if t == "" {
 			logOutput.SetText(msg)
@@ -242,33 +266,78 @@ func main() {
 	installBtn := widget.NewButton("  Install  ", nil)
 	installBtn.Importance = widget.HighImportance
 
+	// Retry button — hidden until failure
+	retryBtn := widget.NewButton("  Retry  ", nil)
+	retryBtn.Hide()
+
 	installBtn.OnTapped = func() {
 		installBtn.Disable()
+		retryBtn.Hide()
+		errorLabel.Hide()
 		progress.Show()
 		stepLabel.Show()
 		logOutput.Show()
+		logOutput.SetText("")
+
 		steps := buildSteps(currentOS)
 		total := float64(len(steps))
 
 		go func() {
 			for i, step := range steps {
+				// Send step update via channel
+				results <- result{stepName: step.label}
+
+				// Update progress directly — Fyne widget methods are
+				// goroutine-safe for SetValue/SetText
 				stepLabel.SetText(step.label)
 				progress.SetValue(float64(i) / total)
-				log(fmt.Sprintf("\n── %s", step.label))
-				if err := step.run(log); err != nil {
-					log(fmt.Sprintf("ERROR: %v", err))
-					dialog.ShowError(fmt.Errorf("%s\n\n%v", step.label, err), w)
-					installBtn.Enable()
+				appendLog(fmt.Sprintf("\n── %s", step.label))
+
+				if err := step.run(appendLog); err != nil {
+					appendLog(fmt.Sprintf("\n✗ FAILED: %v", err))
+					results <- result{err: err, stepName: step.label}
 					return
 				}
 			}
-			progress.SetValue(1)
-			stepLabel.SetText("✓ Installation complete!")
-			log("\n✓ Bullang ecosystem installed successfully.")
-			log("  Restart your terminal, then run: bullarchy  or  bullscript")
-			dialog.ShowInformation("Installation Complete",
-				"Bullang ecosystem installed successfully!\n\nRestart your terminal, then:\n  bullarchy\n  bullscript", w)
+			results <- result{done: true}
 		}()
+	}
+
+	// Process results on main thread via polling with a goroutine
+	// that calls fyne's thread-safe QueueEvent
+	go func() {
+		for r := range results {
+			r := r // capture
+			if r.stepName != "" && r.err == nil && !r.done {
+				continue // progress already set directly
+			}
+			fyne.CurrentApp().SendNotification(&fyne.Notification{
+				Title:   "Bullang Installer",
+				Content: "See installer window",
+			})
+			if r.err != nil {
+				// Show error on main thread
+				w.Canvas().Refresh(w.Content())
+				errorLabel.SetText(fmt.Sprintf("✗ Step failed: %s\n\nError: %v\n\nCheck the log above for details.", r.stepName, r.err))
+				errorLabel.Color = theme.ErrorColor()
+				errorLabel.Show()
+				progress.Hide()
+				stepLabel.Hide()
+				installBtn.Enable()
+				retryBtn.Show()
+				w.Canvas().Refresh(w.Content())
+			} else if r.done {
+				progress.SetValue(1)
+				stepLabel.SetText("✓ Installation complete!")
+				appendLog("\n✓ Bullang ecosystem installed successfully.")
+				appendLog("  Restart your terminal, then run: bullarchy  or  bullscript")
+				w.Canvas().Refresh(w.Content())
+			}
+		}
+	}()
+
+	retryBtn.OnTapped = func() {
+		installBtn.OnTapped()
 	}
 
 	w.SetContent(container.NewPadded(container.NewVBox(
@@ -276,9 +345,13 @@ func main() {
 		title, subtitle, osLabel,
 		widget.NewSeparator(),
 		container.NewCenter(installBtn),
-		stepLabel, progress,
+		container.NewCenter(retryBtn),
+		stepLabel,
+		progress,
+		errorLabel,
 		widget.NewSeparator(),
 		logScroll,
 	)))
+
 	w.ShowAndRun()
 }
