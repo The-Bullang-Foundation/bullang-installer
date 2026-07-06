@@ -9,89 +9,108 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - name: Linux x86_64
-            os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            output: bullang-installer-linux-amd64
-            apt_deps: true
-
-          - name: Linux ARM64
-            os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            output: bullang-installer-linux-arm64
-            apt_deps: true
-
-          - name: macOS Apple Silicon (ARM64)
-            os: macos-latest
-            goos: darwin
-            goarch: arm64
-            output: bullang-installer-macos-apple-silicon
-            apt_deps: false
-
-          - name: macOS Intel (x86_64) — cross-compiled from ARM64
-            os: macos-latest
-            goos: darwin
-            goarch: amd64
-            output: bullang-installer-macos-intel
-            apt_deps: false
-
-          - name: Windows x86_64
-            os: windows-latest
-            goos: windows
-            goarch: amd64
-            output: bullang-installer-windows-x86_64.exe
-            apt_deps: false
-
+  build-linux-amd64:
+    name: Build Linux x86_64
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache: false
 
-      - name: Install Linux GUI dependencies
-        if: matrix.apt_deps
+      - name: Install GUI dependencies
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
-            gcc \
-            libgl1-mesa-dev \
-            libx11-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxxf86vm-dev
+            gcc libgl1-mesa-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxi-dev libxxf86vm-dev
 
-      - name: Install Fyne dependencies
-        run: go mod tidy
+      - name: Build
+        run: |
+          go mod tidy
+          go build -ldflags="-s -w" -o bullang-installer-linux-amd64 .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bullang-installer-linux-amd64
+          path: bullang-installer-linux-amd64
+
+  build-macos-arm64:
+    name: Build macOS Apple Silicon
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
 
       - name: Build
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+          GOOS: darwin
+          GOARCH: arm64
           CGO_ENABLED: 1
-        run: go build -ldflags="-s -w" -o ${{ matrix.output }} .
+        run: |
+          go mod tidy
+          go build -ldflags="-s -w" -o bullang-installer-macos-apple-silicon .
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.output }}
-          path: ${{ matrix.output }}
+          name: bullang-installer-macos-apple-silicon
+          path: bullang-installer-macos-apple-silicon
+
+  build-macos-amd64:
+    name: Build macOS Intel
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: Build
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+          CGO_ENABLED: 1
+        run: |
+          go mod tidy
+          go build -ldflags="-s -w" -o bullang-installer-macos-intel .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bullang-installer-macos-intel
+          path: bullang-installer-macos-intel
+
+  build-windows:
+    name: Build Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: Build
+        run: |
+          go mod tidy
+          go build -ldflags="-s -w -H=windowsgui" -o bullang-installer-windows-x86_64.exe .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bullang-installer-windows-x86_64.exe
+          path: bullang-installer-windows-x86_64.exe
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs:
+      - build-linux-amd64
+      - build-macos-arm64
+      - build-macos-amd64
+      - build-windows
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -105,9 +124,9 @@ jobs:
         with:
           name: Bullang Installer ${{ github.ref_name }}
           body: |
-            ## Bullang Ecosystem Installer ${{ github.ref_name }}
+            ## Bullang Installer ${{ github.ref_name }}
 
-            Download the installer for your platform and double-click to run it.
+            Download the file for your platform and double-click to run it.
 
             ---
 
@@ -117,23 +136,31 @@ jobs:
 
             ### For macOS — Apple Silicon (M1, M2, M3, M4)
             → Download **`bullang-installer-macos-apple-silicon`**
-            Then in Terminal: `chmod +x bullang-installer-macos-apple-silicon && ./bullang-installer-macos-apple-silicon`
+            Open Terminal and run:
+            ```
+            chmod +x ~/Downloads/bullang-installer-macos-apple-silicon
+            ~/Downloads/bullang-installer-macos-apple-silicon
+            ```
 
             ### For macOS — Intel
             → Download **`bullang-installer-macos-intel`**
-            Then in Terminal: `chmod +x bullang-installer-macos-intel && ./bullang-installer-macos-intel`
+            Open Terminal and run:
+            ```
+            chmod +x ~/Downloads/bullang-installer-macos-intel
+            ~/Downloads/bullang-installer-macos-intel
+            ```
 
-            ### For Linux — x86_64 (Ubuntu, Debian, Arch, most desktop distros)
+            ### For Linux — x86_64 (Ubuntu, Debian, Arch and most desktop distros)
             → Download **`bullang-installer-linux-amd64`**
-            Then in Terminal: `chmod +x bullang-installer-linux-amd64 && ./bullang-installer-linux-amd64`
-
-            ### For Linux — ARM64 (Raspberry Pi, ARM servers)
-            → Download **`bullang-installer-linux-arm64`**
-            Then in Terminal: `chmod +x bullang-installer-linux-arm64 && ./bullang-installer-linux-arm64`
+            Open Terminal and run:
+            ```
+            chmod +x ~/Downloads/bullang-installer-linux-amd64
+            ~/Downloads/bullang-installer-linux-amd64
+            ```
 
             ---
 
-            **What gets installed:** Go, Rust + Cargo, Bullscript, Bullarchy, Python, Java, C/C++
+            **What gets installed:** Go · Rust + Cargo · Bullscript · Bullarchy · Python · Java · C/C++
           files: dist/*
           draft: false
           prerelease: false
