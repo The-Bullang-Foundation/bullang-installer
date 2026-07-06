@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,9 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
+
+//go:embed Icon.png
+var iconBytes []byte
 
 // ── OS detection ──────────────────────────────────────────────────────────────
 
@@ -65,10 +69,10 @@ func buildSteps(currentOS OS) []Step {
 				}
 				switch currentOS {
 				case OSLinuxApt:
-					_ = runCmd(log, "sudo", "apt-get", "update", "-y")
-					return runCmd(log, "sudo", "apt-get", "install", "-y", "golang")
+					_ = priv(log, "apt-get", "update", "-y")
+					return priv(log, "apt-get", "install", "-y", "golang")
 				case OSLinuxArch:
-					return runCmd(log, "sudo", "pacman", "-Sy", "--noconfirm", "go")
+					return priv(log, "pacman", "-Sy", "--noconfirm", "go")
 				case OSMac:
 					if err := ensureBrew(log); err != nil {
 						return err
@@ -137,11 +141,11 @@ func buildSteps(currentOS OS) []Step {
 			run: func(log func(string)) error {
 				switch currentOS {
 				case OSLinuxApt:
-					_ = runCmd(log, "sudo", "apt-get", "update", "-y")
-					return runCmd(log, "sudo", "apt-get", "install", "-y",
+					_ = priv(log, "apt-get", "update", "-y")
+					return priv(log, "apt-get", "install", "-y",
 						"python3", "python3-pip", "default-jdk", "gcc", "g++", "build-essential")
 				case OSLinuxArch:
-					return runCmd(log, "sudo", "pacman", "-Sy", "--noconfirm",
+					return priv(log, "pacman", "-Sy", "--noconfirm",
 						"python", "python-pip", "jdk-openjdk", "gcc")
 				case OSMac:
 					if err := ensureBrew(log); err != nil {
@@ -178,6 +182,30 @@ func ensureBrew(log func(string)) error {
 		`/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`)
 }
 
+// privExec returns the first available privilege escalation tool.
+// Returns "" if none found — callers should handle that case.
+func privExec() string {
+	for _, tool := range []string{"sudo", "doas", "pkexec"} {
+		if _, err := exec.LookPath(tool); err == nil {
+			return tool
+		}
+	}
+	return ""
+}
+
+// priv runs a command with privilege escalation if available.
+// If no escalation tool is found, logs a clear message and returns an error.
+func priv(log func(string), args ...string) error {
+	tool := privExec()
+	if tool == "" {
+		log("✗ No privilege escalation tool found (sudo/doas/pkexec).")
+		log("  Please install the following packages manually:")
+		log("  " + strings.Join(args, " "))
+		return fmt.Errorf("no privilege escalation tool available (sudo/doas/pkexec not found)")
+	}
+	return runCmd(log, tool, args...)
+}
+
 func runCmd(log func(string), name string, args ...string) error {
 	log(fmt.Sprintf("$ %s %s", name, strings.Join(args, " ")))
 	cmd := exec.Command(name, args...)
@@ -210,11 +238,12 @@ type result struct {
 func main() {
 	currentOS := detectOS()
 	a := app.New()
+	a.SetIcon(fyne.NewStaticResource("Icon.png", iconBytes))
 	w := a.NewWindow("Bullang Installer")
 	w.Resize(fyne.NewSize(660, 580))
 	w.SetFixedSize(true)
 
-	logo := canvas.NewImageFromFile("Icon.png")
+	logo := canvas.NewImageFromResource(fyne.NewStaticResource("Icon.png", iconBytes))
 	logo.FillMode = canvas.ImageFillContain
 	logo.SetMinSize(fyne.NewSize(96, 96))
 
