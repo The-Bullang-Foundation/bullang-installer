@@ -11,7 +11,6 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -319,7 +318,6 @@ func main() {
 				// Show error on main thread
 				w.Canvas().Refresh(w.Content())
 				errorLabel.SetText(fmt.Sprintf("✗ Step failed: %s\n\nError: %v\n\nCheck the log above for details.", r.stepName, r.err))
-				errorLabel.Color = theme.ErrorColor()
 				errorLabel.Show()
 				progress.Hide()
 				stepLabel.Hide()
