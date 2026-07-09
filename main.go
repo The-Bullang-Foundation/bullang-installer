@@ -143,31 +143,71 @@ func buildSteps(currentOS OS) []Step {
 			},
 		},
 		{
+			label: "Installing GUI build dependencies...",
+			run: func(log func(string)) error {
+				switch currentOS {
+				case OSLinuxApt:
+					_ = priv(log, "apt-get", "update", "-y")
+					return priv(log, "apt-get", "install", "-y",
+						"gcc",
+						"libgl1-mesa-dev",
+						"libx11-dev",
+						"libxrandr-dev",
+						"libxinerama-dev",
+						"libxcursor-dev",
+						"libxi-dev",
+						"libxxf86vm-dev")
+				case OSLinuxArch:
+					return priv(log, "pacman", "-Sy", "--noconfirm",
+						"gcc",
+						"mesa",
+						"libx11",
+						"libxrandr",
+						"libxinerama",
+						"libxcursor",
+						"libxi")
+				case OSMac:
+					// Xcode command line tools provide everything needed
+					log("macOS: Xcode tools provide GL/X11 equivalents via Metal/Fyne.")
+					return nil
+				case OSWindows:
+					// Windows: no extra deps needed for Fyne
+					log("Windows: no extra GUI dependencies needed.")
+					return nil
+				default:
+					return nil
+				}
+			},
+		},
+		{
 			label: "Building Bullarchy GUI...",
 			run: func(log func(string)) error {
 				home, _ := os.UserHomeDir()
-				guiSrc  := filepath.Join(home, ".bull", "bullarchy-src", "gui")
-				guiBin  := guiBinaryPath(home, currentOS)
+				guiSrc := filepath.Join(home, ".bull", "bullarchy-src", "gui")
+				guiBin := guiBinaryPath(home, currentOS)
 
 				// Ensure output directory exists
 				_ = os.MkdirAll(filepath.Dir(guiBin), 0755)
 
-				if err := runCmd(log, "go", "mod", "tidy"); err != nil {
-					_ = err // non-fatal
-				}
+				// go mod tidy first
+				tidyCmd := exec.Command("go", "mod", "tidy")
+				tidyCmd.Dir = guiSrc
+				tidyCmd.Stdout = &logWriter{log: log}
+				tidyCmd.Stderr = &logWriter{log: log}
+				log("$ go mod tidy")
+				_ = tidyCmd.Run()
 
-				args := []string{"build", "-ldflags=-s -w"}
+				// Build
+				ldflags := "-s -w"
 				if currentOS == OSWindows {
-					args = append(args, "-ldflags=-s -w -H=windowsgui")
+					ldflags = "-s -w -H=windowsgui"
 				}
-				args = append(args, "-o", guiBin, ".")
-
-				cmd := exec.Command("go", args[1:]...)
-				cmd.Dir = guiSrc
-				cmd.Stdout = &logWriter{log: log}
-				cmd.Stderr = &logWriter{log: log}
+				buildCmd := exec.Command("go", "build", "-ldflags="+ldflags, "-o", guiBin, ".")
+				buildCmd.Dir = guiSrc
+				buildCmd.Stdout = &logWriter{log: log}
+				buildCmd.Stderr = &logWriter{log: log}
 				log(fmt.Sprintf("$ go build -o %s .", guiBin))
-				return cmd.Run()
+				return buildCmd.Run()
 			},
 		},
 		{
