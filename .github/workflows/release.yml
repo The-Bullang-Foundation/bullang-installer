@@ -1,0 +1,139 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - name: Linux x86_64
+            os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            output: bullang-installer-linux-amd64
+            apt_deps: true
+
+          - name: Linux ARM64
+            os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            output: bullang-installer-linux-arm64
+            apt_deps: true
+
+          - name: macOS Apple Silicon (ARM64)
+            os: macos-latest
+            goos: darwin
+            goarch: arm64
+            output: bullang-installer-macos-apple-silicon
+            apt_deps: false
+
+          - name: macOS Intel (x86_64) — cross-compiled from ARM64
+            os: macos-latest
+            goos: darwin
+            goarch: amd64
+            output: bullang-installer-macos-intel
+            apt_deps: false
+
+          - name: Windows x86_64
+            os: windows-latest
+            goos: windows
+            goarch: amd64
+            output: bullang-installer-windows-x86_64.exe
+            apt_deps: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install Linux GUI dependencies
+        if: matrix.apt_deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            gcc \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxxf86vm-dev
+
+      - name: Install Fyne dependencies
+        run: go mod tidy
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
+        run: go build -ldflags="-s -w" -o ${{ matrix.output }} .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: ${{ matrix.output }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Bullang Installer ${{ github.ref_name }}
+          body: |
+            ## Bullang Ecosystem Installer ${{ github.ref_name }}
+
+            Download the installer for your platform and double-click to run it.
+
+            ---
+
+            ### For Windows
+            → Download **`bullang-installer-windows-x86_64.exe`**
+            Right-click → Run as administrator if prompted.
+
+            ### For macOS — Apple Silicon (M1, M2, M3, M4)
+            → Download **`bullang-installer-macos-apple-silicon`**
+            Then in Terminal: `chmod +x bullang-installer-macos-apple-silicon && ./bullang-installer-macos-apple-silicon`
+
+            ### For macOS — Intel
+            → Download **`bullang-installer-macos-intel`**
+            Then in Terminal: `chmod +x bullang-installer-macos-intel && ./bullang-installer-macos-intel`
+
+            ### For Linux — x86_64 (Ubuntu, Debian, Arch, most desktop distros)
+            → Download **`bullang-installer-linux-amd64`**
+            Then in Terminal: `chmod +x bullang-installer-linux-amd64 && ./bullang-installer-linux-amd64`
+
+            ### For Linux — ARM64 (Raspberry Pi, ARM servers)
+            → Download **`bullang-installer-linux-arm64`**
+            Then in Terminal: `chmod +x bullang-installer-linux-arm64 && ./bullang-installer-linux-arm64`
+
+            ---
+
+            **What gets installed:** Go, Rust + Cargo, Bullscript, Bullarchy, Python, Java, C/C++
+          files: dist/*
+          draft: false
+          prerelease: false
