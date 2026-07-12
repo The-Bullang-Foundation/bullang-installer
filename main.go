@@ -405,7 +405,7 @@ func main() {
 	a := app.New()
 	a.SetIcon(fyne.NewStaticResource("Icon.png", iconBytes))
 	w := a.NewWindow("Bullang Installer")
-	w.Resize(fyne.NewSize(660, 580))
+	w.Resize(fyne.NewSize(660, 420))
 	w.SetFixedSize(true)
 
 	logo := canvas.NewImageFromResource(fyne.NewStaticResource("Icon.png", iconBytes))
@@ -440,7 +440,7 @@ func main() {
 	logOutput.Disable()
 	logOutput.Hide()
 	logScroll := container.NewScroll(logOutput)
-	logScroll.SetMinSize(fyne.NewSize(620, 220))
+	logScroll.SetMinSize(fyne.NewSize(620, 120))
 
 	results := make(chan result, 1)
 
@@ -456,6 +456,13 @@ func main() {
 
 	retryBtn := widget.NewButton("  Retry  ", nil)
 	retryBtn.Hide()
+
+	finishBtn := widget.NewButton("  Finish  ", nil)
+	finishBtn.Importance = widget.SuccessImportance
+	finishBtn.Hide()
+	finishBtn.OnTapped = func() {
+		fyne.CurrentApp().Quit()
+	}
 
 	installBtn := widget.NewButton("  Install  ", nil)
 	installBtn.Importance = widget.HighImportance
@@ -507,6 +514,7 @@ func main() {
 				appendLog("\n✓ Bullang ecosystem installed successfully.")
 				appendLog("  Bullarchy GUI shortcut created — find it in your applications menu.")
 				appendLog("  Restart your terminal, then run: bullarchy  or  bullscript")
+				finishBtn.Show()
 				w.Canvas().Refresh(w.Content())
 			}
 		}
@@ -518,6 +526,7 @@ func main() {
 		widget.NewSeparator(),
 		container.NewCenter(installBtn),
 		container.NewCenter(retryBtn),
+		container.NewCenter(finishBtn),
 		stepLabel, progress,
 		errorLabel,
 		widget.NewSeparator(),
