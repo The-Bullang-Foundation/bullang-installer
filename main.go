@@ -117,6 +117,79 @@ func buildSteps(currentOS OS) []Step {
 			},
 		},
 		{
+			label: "Adding Bullang tools to PATH permanently...",
+			run: func(log func(string)) error {
+				home, _ := os.UserHomeDir()
+				cargoBin := filepath.Join(home, ".cargo", "bin")
+				localBin := filepath.Join(home, ".local", "bin")
+
+				switch currentOS {
+				case OSLinuxApt, OSLinuxArch:
+					// Add to ~/.bashrc and ~/.zshrc if they exist
+					exportLine := fmt.Sprintf("\nexport PATH=\"%s:%s:$PATH\"\n", cargoBin, localBin)
+					for _, rc := range []string{
+						filepath.Join(home, ".bashrc"),
+						filepath.Join(home, ".zshrc"),
+						filepath.Join(home, ".profile"),
+					} {
+						if _, err := os.Stat(rc); err == nil {
+							content, _ := os.ReadFile(rc)
+							if !strings.Contains(string(content), cargoBin) {
+								f, err := os.OpenFile(rc, os.O_APPEND|os.O_WRONLY, 0644)
+								if err == nil {
+									f.WriteString(exportLine)
+									f.Close()
+									log(fmt.Sprintf("  Added PATH to %s", rc))
+								}
+							} else {
+								log(fmt.Sprintf("  PATH already set in %s", rc))
+							}
+						}
+					}
+					return nil
+
+				case OSMac:
+					exportLine := fmt.Sprintf("\nexport PATH=\"%s:%s:$PATH\"\n", cargoBin, localBin)
+					for _, rc := range []string{
+						filepath.Join(home, ".zshrc"),
+						filepath.Join(home, ".bash_profile"),
+						filepath.Join(home, ".profile"),
+					} {
+						if _, err := os.Stat(rc); err == nil {
+							content, _ := os.ReadFile(rc)
+							if !strings.Contains(string(content), cargoBin) {
+								f, err := os.OpenFile(rc, os.O_APPEND|os.O_WRONLY, 0644)
+								if err == nil {
+									f.WriteString(exportLine)
+									f.Close()
+									log(fmt.Sprintf("  Added PATH to %s", rc))
+								}
+							} else {
+								log(fmt.Sprintf("  PATH already set in %s", rc))
+							}
+						}
+					}
+					return nil
+
+				case OSWindows:
+					// Add cargo bin and local bin to user PATH via PowerShell
+					ps := fmt.Sprintf(
+						`$p = [Environment]::GetEnvironmentVariable('Path','User');`+
+							`if ($p -notlike '*%s*') {`+
+							`[Environment]::SetEnvironmentVariable('Path', '%s;%s;' + $p, 'User');`+
+							`Write-Output 'PATH updated.'`+
+							`} else { Write-Output 'PATH already set.' }`,
+						cargoBin, cargoBin, localBin,
+					)
+					return runCmd(log, "powershell", "-Command", ps)
+
+				default:
+					log("Unknown OS — skipping PATH setup.")
+					return nil
+				}
+			},
+		},
+		{
 			label: "Installing Bullscript...",
 			run: func(log func(string)) error {
 				return runCmd(log, "cargo", "install",
